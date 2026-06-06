@@ -30,8 +30,8 @@ import (
 	"github.com/knadh/koanf/v2"
 	"github.com/miekg/dns"
 	"github.com/oraoto/go-pidfd"
+	"github.com/phuslu/log"
 	"github.com/robertmin1/socks5/v4"
-	"github.com/rs/zerolog"
 	libseccomp "github.com/seccomp/libseccomp-golang"
 	"github.com/spf13/pflag"
 	"golang.org/x/sys/unix"
@@ -127,7 +127,7 @@ type HTTPDialer struct {
 	Password string
 }
 
-var logger zerolog.Logger
+var logger = log.DefaultLogger
 var allowedAddressesMap = make(map[string]struct{})
 var allowedTCPOriginMap = make(map[string]struct{})
 
@@ -399,14 +399,18 @@ func initSeccomp() chan<- struct{} {
 	return stop
 }
 
-func main() {
-	// Initialize logger
-	logger = zerolog.New(
-		zerolog.ConsoleWriter{
-			Out:        os.Stderr,    // Output to stderr
-			TimeFormat: time.RFC3339, // Time format
+func initLogger() {
+	logger = log.Logger{
+		Level:  log.TraceLevel,
+		Caller: 1,
+		Writer: &log.ConsoleWriter{
+			Writer: os.Stderr,
 		},
-	).Level(zerolog.TraceLevel).With().Timestamp().Caller().Logger()
+	}
+}
+
+func main() {
+	initLogger()
 
 	setupCLI()
 
@@ -415,12 +419,14 @@ func main() {
 
 	proxyFullAddr4, err := NewFullAddress(socksTCPv4)
 	if err != nil {
-		logger.Fatal().Msgf("Failed to parse Proxy IPv4 address: %v", err)
+		logger.Error().Msgf("Failed to parse Proxy IPv4 address: %v", err)
+		
 	}
 
 	proxyFullAddr6, err := NewFullAddress(socksTCPv6)
 	if err != nil {
 		logger.Fatal().Msgf("Failed to parse Proxy IPv6 address: %v", err)
+
 	}
 
 	proxySockaddr4 = netTCPAddrToSockAddr(*proxyFullAddr4)
@@ -431,7 +437,7 @@ func main() {
 
 	initializeAuthData()
 
-	runProgram(Flags.Args()[0]) // Handle program execution after flags are processed
+	runProgram(Flags.Args()[0])
 }
 
 func runProgram(program string) {
