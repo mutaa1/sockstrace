@@ -1,0 +1,170 @@
+---
+name: CI
+
+on:
+  push: {}
+  pull_request: {}
+
+jobs:
+  golangci-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libseccomp-dev \
+            pkg-config \
+            build-essential
+
+      - name: Prepare modules
+        run: |
+          go env -w GO111MODULE=on
+          go mod download
+          go mod tidy
+          go generate ./...
+          go mod tidy
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          args: --timeout=5m
+
+
+  shellcheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: bash testdata/shellcheck.bash
+
+
+  socks-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wget \
+            curl \
+            netcat-openbsd \
+            libseccomp-dev \
+            pkg-config \
+            build-essential \
+            tor
+
+      - name: Prepare modules
+        run: |
+          go mod tidy
+          go mod download
+
+      - name: Build project
+        run: go build -o sockstrace .
+
+      # ✅ FIXED: reliable Tor startup
+      - name: Start Tor SOCKS5
+        run: |
+          tor &
+          for i in {1..20}; do
+            nc -z 127.0.0.1 9050 && echo "Tor SOCKS ready" && exit 0
+            sleep 1
+          done
+
+          echo "Tor failed to start"
+          exit 1
+
+      - name: Verify SOCKS port
+        run: ss -lntp | grep 9050 || true
+
+      - name: WGET SOCKS auth test
+        run: |
+          ./sockstrace wget \
+            --args "https://check.torproject.org" \
+            --proxy-user user \
+            --proxy-pass pass
+
+      - name: CURL SOCKS auth test
+        run: |
+          ./sockstrace curl \
+            --args "https://check.torproject.org" \
+            --proxy-user user \
+            --proxy-pass pass
+
+
+  firefox-webrtc-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            firefox \
+            libseccomp-dev \
+            pkg-config \
+            build-essential
+
+      - name: Prepare modules
+        run: |
+          go mod tidy
+          go mod download
+
+      - name: Build project
+        run: go build -o sockstrace .
+
+      - name: Start SOCKS server
+        run: |
+          cd testdata
+          go run socks5_server.go &
+          sleep 3
+
+      - name: Setup Firefox profile
+        run: bash testdata/setup_firefox_profile.sh
+
+      - name: Run Firefox WebRTC test
+        run: |
+          timeout 60 ./sockstrace firefox \
+            --args "https://browserleaks.com/webrtc" \
+            --args "-P proxy-profile" \
+            --args "--headless" \
+            --args "--no-sandbox" \
+            --logleaks
+        continue-on-error: true
