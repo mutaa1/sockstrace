@@ -1,7 +1,7 @@
 ---
 name: CI
 
-on:
+"on":
   push: {}
   pull_request: {}
 
@@ -20,7 +20,8 @@ jobs:
             allow_failure: false
 
           - name: Go Lint Mandatory
-            golangci_args: "--disable=cyclop,dupl,godox,err113,mnd,staticcheck,lll,revive,varnamelen,wrapcheck" # yamllint disable-line rule:line-length
+            golangci_args: >-
+              --disable=cyclop,dupl,godox,err113,mnd,staticcheck,lll,revive,varnamelen,wrapcheck
             allow_failure: false
 
           - name: Go Lint
@@ -58,21 +59,12 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
           args: >-
             --default=all
             --disable=exhaustruct,gochecknoglobals,gochecknoinits,interfacebloat,gomoddirectives,lll,godot,tagalign,godox,depguard,funlen,gocognit,gosec,nestif,noinlineerr,cyclop,err113,mnd,varnamelen
             ${{ matrix.golangci_args }}
             --timeout=5m
             -v
-            --output.json.path=lint-report.json
-
-      - name: Upload lint report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-report-${{ matrix.name }}
-          path: lint-report.json
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -120,7 +112,8 @@ jobs:
           go mod download
 
       - name: Build project
-        run: go build -o sockstrace .
+        run: |
+          go build -o sockstrace .
 
       - name: Start Tor SOCKS5
         run: |
@@ -152,20 +145,17 @@ jobs:
   firefox-webrtc-test:
     runs-on: ubuntu-latest
 
+    container:
+      image: golang:1.22
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          cache: true
-
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
             firefox-esr \
             libseccomp-dev \
             pkg-config \
@@ -179,7 +169,8 @@ jobs:
       - name: Build project
         run: |
           go build -o sockstrace .
-          cd testdata && go mod tidy
+          cd testdata
+          go mod tidy
 
       - name: Start SOCKS server
         env:
