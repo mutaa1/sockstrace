@@ -116,54 +116,59 @@ jobs:
             --proxy-pass pass
 
   firefox-webrtc-test:
-    runs-on: ubuntu-latest
+  runs-on: ubuntu-latest
 
-    env:
-      NO_AUTH: "1"
+  env:
+    NO_AUTH: "1"
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          cache: true
+    # ✅ FIX 1: Go version must match dependencies
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.25"
+        cache: true
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            firefox \
-            libseccomp-dev \
-            pkg-config \
-            build-essential
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          firefox \
+          libseccomp-dev \
+          pkg-config \
+          build-essential
 
-      - name: Prepare modules
-        run: |
-          go mod tidy
-          go mod download
-          cd testdata && go mod tidy
+    # ✅ FIX 2: Prevent testdata module confusion
+    - name: Prepare modules
+      run: |
+        export GOFLAGS="-mod=mod"
+        export GOWORK=off
+        go mod download
+        go mod tidy
+        cd testdata && go mod tidy
 
-      - name: Build project
-        run: go build -o sockstrace .
+    - name: Build project
+      run: go build -o sockstrace .
 
-      - name: Start SOCKS server
-        run: |
-          cd testdata
-          go run socks5_server.go &
-          sleep 3
+    - name: Start SOCKS server
+      run: |
+        cd testdata
+        go run socks5_server.go &
+        sleep 3
 
-      - name: Setup Firefox profile
-        run: bash testdata/setup_firefox_profile.sh
+    - name: Setup Firefox profile
+      run: bash testdata/setup_firefox_profile.sh
 
-      - name: Run Firefox WebRTC test
-        run: |
-          timeout 60 ./sockstrace firefox \
-            --args "https://browserleaks.com/webrtc" \
-            --args "-P" \
-            --args "proxy-profile" \
-            --args "--headless" \
-            --args "--no-sandbox" \
-            --logleaks
+    # ✅ FIX 3: Correct Cirrus-equivalent Firefox args
+    - name: Run Firefox WebRTC test
+      run: |
+        timeout 60 ./sockstrace firefox \
+          --args "https://browserleaks.com/webrtc" \
+          --args "-P" \
+          --args "proxy-profile" \
+          --args "--headless" \
+          --args "--no-sandbox" \
+          --logleaks
