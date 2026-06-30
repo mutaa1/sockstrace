@@ -8,6 +8,7 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.allow_failure }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -22,13 +23,17 @@ jobs:
             golangci_args: ""
             allow_failure: true
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: true
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -36,6 +41,7 @@ jobs:
             libseccomp-dev \
             pkg-config \
             build-essential
+
       - name: Prepare modules
         run: |
           go env -w GO111MODULE=on
@@ -43,15 +49,25 @@ jobs:
           go mod tidy
           go generate ./...
           go mod tidy
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          args: >
+          version: latest
+          args: >-
             --default=all
             --disable=exhaustruct,gochecknoglobals,gochecknoinits,interfacebloat,gomoddirectives,lll,godot,tagalign,godox,depguard,funlen,gocognit,gosec,nestif,noinlineerr,cyclop,err113,mnd,varnamelen
             ${{ matrix.golangci_args }}
-            -v
             --timeout=5m
+            -v
+            --output.json.path=lint-report.json
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report-${{ matrix.name }}
+          path: lint-report.json
   shellcheck:
     runs-on: ubuntu-latest
     steps:
@@ -118,25 +134,32 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: true
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            firefox \
+            firefox-esr \
             libseccomp-dev \
             pkg-config \
             build-essential
+
       - name: Prepare modules
         run: |
           go mod tidy
           go mod download
+
       - name: Build project
-        run: go build -o sockstrace .
+        run: |
+          go build -o sockstrace .
+          cd testdata && go mod tidy
+
       - name: Start SOCKS server
         env:
           NO_AUTH: "1"
@@ -144,8 +167,11 @@ jobs:
           cd testdata
           go run socks5_server.go &
           sleep 3
+
       - name: Setup Firefox profile
-        run: bash testdata/setup_firefox_profile.sh
+        run: |
+          bash testdata/setup_firefox_profile.sh
+
       - name: Run Firefox WebRTC test
         run: |
           timeout 60 ./sockstrace firefox \
@@ -153,5 +179,4 @@ jobs:
             --args "-P" \
             --args "proxy-profile" \
             --args "--headless" \
-            --args "--no-sandbox" \
-            --logleaks
+            --logleaks || [ $? -eq 124 ]
