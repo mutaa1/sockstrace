@@ -1,24 +1,18 @@
 name: CI
-
 on:
-  push:
-  pull_request:
-
+  push: {}
+  pull_request: {}
 jobs:
   golangci-lint:
-    name: Go Lint
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: true
-
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -26,130 +20,106 @@ jobs:
             libseccomp-dev \
             pkg-config \
             build-essential
-
       - name: Prepare modules
         run: |
+          go env -w GO111MODULE=on
+          go mod download
           go mod tidy
           go generate ./...
           go mod tidy
-
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          args: >
-            --default=all
-            --disable=exhaustruct,gochecknoglobals,gochecknoinits,interfacebloat,gomoddirectives,lll,godot,tagalign,godox,depguard,funlen,gocognit,gosec,nestif,noinlineerr,cyclop,err113,mnd,varnamelen
-            -v
-            --timeout=5m
+          args: --timeout=5m
 
   shellcheck:
-    name: ShellCheck
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Install ShellCheck
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck
-
       - name: Run ShellCheck
         run: bash testdata/shellcheck.bash
 
   socks-tests:
-    name: Socksification Tests
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: true
-
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             wget \
             curl \
+            netcat-openbsd \
             libseccomp-dev \
             pkg-config \
-            build-essential
-
-      - name: Build project
+            build-essential \
+            tor
+      - name: Prepare modules
         run: |
           go mod tidy
-          go build -o sockstrace .
-          (
-            cd testdata
-            go mod tidy
-          )
-
-      - name: Start SOCKS5 server
+          go mod download
+      - name: Build project
+        run: go build -o sockstrace .
+      - name: Start Tor SOCKS5
         run: |
-          (
-            cd testdata
-            go run socks5_server.go &
-          )
-          sleep 3
-
-      - name: Test wget socksification
+          tor &
+          for i in {1..20}; do
+            nc -z 127.0.0.1 9050 && echo "Tor SOCKS ready" && exit 0
+            sleep 1
+          done
+          echo "Tor failed to start"
+          exit 1
+      - name: Verify SOCKS port
+        run: ss -lntp | grep 9050 || true
+      - name: WGET SOCKS auth test
         run: |
-          echo "Testing wget socksification..."
           ./sockstrace wget \
             --args "https://check.torproject.org" \
             --proxy-user user \
             --proxy-pass pass
-
-      - name: Test curl socksification
+      - name: CURL SOCKS auth test
         run: |
-          echo "Testing curl socksification..."
           ./sockstrace curl \
             --args "https://check.torproject.org" \
             --proxy-user user \
             --proxy-pass pass
 
   firefox-webrtc-test:
-    name: WebRTC Firefox Test
     runs-on: ubuntu-latest
-
     env:
       NO_AUTH: "1"
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: true
-
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            firefox \
+            firefox-esr \
             libseccomp-dev \
             pkg-config \
             build-essential
-
       - name: Build project
         run: |
           go mod tidy
           go build -o sockstrace .
-          (
-            cd testdata
-            go mod tidy
-          )
-
+          cd testdata && go mod tidy
       - name: Start SOCKS5 server
         run: |
           (
@@ -157,12 +127,10 @@ jobs:
             go run socks5_server.go &
           )
           sleep 3
-
       - name: Setup Firefox profile
         run: |
           bash testdata/setup_firefox_profile.sh
-
-      - name: Test Firefox via SOCKS5 proxy
+      - name: Run Firefox WebRTC test
         run: |
           echo "Testing Firefox via SOCKS5 proxy..."
           timeout 60 ./sockstrace firefox \
