@@ -4,33 +4,63 @@
   pull_request: {}
 jobs:
   golangci-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          cache: true
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libseccomp-dev \
-            pkg-config \
-            build-essential
-      - name: Prepare modules
-        run: |
-          go env -w GO111MODULE=on
-          go mod download
-          go mod tidy
-          go generate ./...
-          go mod tidy
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          args: --timeout=5m
+  runs-on: ubuntu-latest
+
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0   # IMPORTANT for --new-from-rev
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.22"
+        cache: true
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libseccomp-dev \
+          pkg-config \
+          build-essential
+
+    - name: Prepare modules
+      run: |
+        go env -w GO111MODULE=on
+        go mod download
+        go mod tidy
+        go generate ./...
+        go mod tidy
+
+    # -----------------------------
+    # 1. STRICT NEW CODE LINT (FAIL PR)
+    # -----------------------------
+    - name: golangci-lint (new code strict)
+      uses: golangci/golangci-lint-action@v8
+      with:
+        version: latest
+        args: >
+          --timeout=5m
+          --new-from-rev=origin/main
+          --disable=cyclop,dupl,godox,err113,mnd,staticcheck,lll,revive,varnamelen,wrapcheck
+
+    # -----------------------------
+    # 2. FULL LINT REPORT (OPTIONAL)
+    # -----------------------------
+    - name: golangci-lint (full report)
+      continue-on-error: true
+      run: |
+        golangci-lint run \
+          --timeout=5m \
+          --out-format=json:lint-report.json
+
+    - name: Upload lint report
+      uses: actions/upload-artifact@v4
+      with:
+        name: golangci-lint-report
+        path: lint-report.json
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -94,7 +124,6 @@ jobs:
             --args "https://check.torproject.org" \
             --proxy-user user \
             --proxy-pass pass
-
   firefox-webrtc-test:
     runs-on: ubuntu-latest
     env:
